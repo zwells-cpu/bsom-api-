@@ -181,6 +181,200 @@ app.get('/referrals/:id', async (req, res) => {
   }
 });
 
+app.post('/referrals', async (req, res) => {
+  try {
+    const data = req.body;
+
+    const result = await db.query(
+      `INSERT INTO public.referrals (
+        first_name, last_name, caregiver, caregiver_phone, caregiver_email
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *`,
+      [
+        data.first_name,
+        data.last_name,
+        data.caregiver,
+        data.caregiver_phone,
+        data.caregiver_email
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Create referral error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/referrals/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = req.body;
+
+    const allowed = ['first_name', 'last_name', 'caregiver', 'caregiver_phone', 'caregiver_email'];
+    const fields = Object.keys(data).filter(k => allowed.includes(k));
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided' });
+    }
+
+    const setClauses = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
+    const values = fields.map(f => data[f]);
+    values.push(id);
+
+    const result = await db.query(
+      `UPDATE public.referrals SET ${setClauses} WHERE id = $${values.length} RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Referral not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Update referral error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/assessments', async (req, res) => {
+  try {
+    const data = req.body;
+
+    const result = await db.query(
+      `INSERT INTO public.assessments (
+        referral_id,
+        parent_interview_status, parent_interview_scheduled_date, parent_interview_completed_date,
+        assessment_status, assessment_started_date, assessment_completed_date,
+        treatment_plan_status, treatment_plan_started_date, treatment_plan_completed_date,
+        authorization_status, authorization_submitted_date, authorization_approved_date,
+        ready_for_services, active_client_date
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING *`,
+      [
+        data.referral_id,
+        data.parent_interview_status ?? null,
+        data.parent_interview_scheduled_date ?? null,
+        data.parent_interview_completed_date ?? null,
+        data.assessment_status ?? null,
+        data.assessment_started_date ?? null,
+        data.assessment_completed_date ?? null,
+        data.treatment_plan_status ?? null,
+        data.treatment_plan_started_date ?? null,
+        data.treatment_plan_completed_date ?? null,
+        data.authorization_status ?? null,
+        data.authorization_submitted_date ?? null,
+        data.authorization_approved_date ?? null,
+        data.ready_for_services ?? false,
+        data.active_client_date ?? null,
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Create assessment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/assessments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = req.body;
+
+    const allowed = [
+      'parent_interview_status', 'parent_interview_scheduled_date', 'parent_interview_completed_date',
+      'assessment_status', 'assessment_started_date', 'assessment_completed_date',
+      'treatment_plan_status', 'treatment_plan_started_date', 'treatment_plan_completed_date',
+      'authorization_status', 'authorization_submitted_date', 'authorization_approved_date',
+      'ready_for_services', 'active_client_date',
+    ];
+    const fields = Object.keys(data).filter(k => allowed.includes(k));
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided' });
+    }
+
+    const setClauses = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
+    const values = fields.map(f => data[f]);
+    values.push(id);
+
+    const result = await db.query(
+      `UPDATE public.assessments SET ${setClauses} WHERE assessment_id = $${values.length} RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Update assessment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/activity-logs', async (req, res) => {
+  try {
+    const data = req.body;
+
+    const result = await db.query(
+      `INSERT INTO public.activity_logs (
+        user_id, user_name, user_role,
+        action_type, entity_type, entity_id, entity_name,
+        details, action, client_name, description, office, actor, metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING *`,
+      [
+        data.user_id ?? null,
+        data.user_name ?? null,
+        data.user_role ?? null,
+        data.action_type ?? null,
+        data.entity_type ?? null,
+        data.entity_id ?? null,
+        data.entity_name ?? null,
+        data.details ?? null,
+        data.action ?? null,
+        data.client_name ?? null,
+        data.description ?? null,
+        data.office ?? null,
+        data.actor ?? null,
+        data.metadata ?? null,
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Create activity log error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/referrals/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(
+      'DELETE FROM public.referrals WHERE id = $1 RETURNING *',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Referral not found' });
+    }
+
+    res.json({ message: 'Referral deleted', data: result.rows[0] });
+  } catch (error) {
+    console.error('Delete error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`BSOM API running on http://localhost:${PORT}`);
