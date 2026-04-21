@@ -164,6 +164,25 @@ app.get('/referrals/:id/profile', async (req, res) => {
   }
 });
 
+app.get('/referrals/:id/assessments', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(
+      `SELECT *
+       FROM public.assessments
+       WHERE referral_id = $1
+       ORDER BY assessment_started_date DESC NULLS LAST, assessment_id DESC`,
+      [id]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Database error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/referrals/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -314,6 +333,26 @@ app.patch('/assessments/:id', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Update assessment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/assessments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(
+      'DELETE FROM public.assessments WHERE assessment_id = $1 RETURNING *',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
+
+    res.json({ message: 'Assessment deleted', data: result.rows[0] });
+  } catch (error) {
+    console.error('Delete assessment error:', error);
     res.status(500).json({ error: error.message });
   }
 });
