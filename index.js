@@ -205,19 +205,21 @@ app.get('/referrals/:id', async (req, res) => {
 
 app.post('/referrals', async (req, res) => {
   try {
-    const d = req.body;
-
+    const data = req.body
+    const fields = Object.keys(data)
+    const values = Object.values(data)
+    const cols = fields.join(', ')
+    const placeholders = fields.map((_, i) => `$${i + 1}`).join(', ')
     const result = await db.query(
-      `INSERT INTO public.referrals (
-        first_name, last_name, dob, caregiver, caregiver_phone, caregiver_email,
-        office, status, date_received, current_stage,
-        insurance, secondary_insurance, insurance_verified,
-        contact1, contact2, contact3,
-        referral_form, permission_assessment, vineland, srs2,
-        attends_school, iep_report, autism_diagnosis, intake_paperwork, intake_personnel,
-        referral_source, referral_source_phone, referral_source_fax,
-        provider_npi, point_of_contact, reason_for_referral, notes
-      )
+      `INSERT INTO public.referrals (${cols}) VALUES (${placeholders}) RETURNING *`,
+      values
+    )
+    res.status(201).json(result.rows[0])
+  } catch (error) {
+    console.error('Create referral error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
       VALUES (
         $1,$2,$3,$4,$5,$6,
         $7,$8,$9,$10,
@@ -630,5 +632,5 @@ app.post('/referrals/:id/documents', uploadSingle('file'), async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`BSOM API running on http://localhost:${PORT}`);
+  console.log(`BSOM API running on port ${PORT}`)
 });
