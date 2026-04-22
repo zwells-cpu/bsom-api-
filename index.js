@@ -205,20 +205,41 @@ app.get('/referrals/:id', async (req, res) => {
 
 app.post('/referrals', async (req, res) => {
   try {
-    const data = req.body;
+    const d = req.body;
 
     const result = await db.query(
       `INSERT INTO public.referrals (
-        first_name, last_name, caregiver, caregiver_phone, caregiver_email
+        first_name, last_name, dob, caregiver, caregiver_phone, caregiver_email,
+        office, status, date_received, current_stage,
+        insurance, secondary_insurance, insurance_verified,
+        contact1, contact2, contact3,
+        referral_form, permission_assessment, vineland, srs2,
+        attends_school, iep_report, autism_diagnosis, intake_paperwork, intake_personnel,
+        referral_source, referral_source_phone, referral_source_fax,
+        provider_npi, point_of_contact, reason_for_referral, notes
       )
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES (
+        $1,$2,$3,$4,$5,$6,
+        $7,$8,$9,$10,
+        $11,$12,$13,
+        $14,$15,$16,
+        $17,$18,$19,$20,
+        $21,$22,$23,$24,$25,
+        $26,$27,$28,
+        $29,$30,$31,$32
+      )
       RETURNING *`,
       [
-        data.first_name,
-        data.last_name,
-        data.caregiver,
-        data.caregiver_phone,
-        data.caregiver_email
+        d.first_name || null, d.last_name || null, d.dob || null,
+        d.caregiver || null, d.caregiver_phone || null, d.caregiver_email || null,
+        d.office || null, d.status || 'active', d.date_received || null, d.current_stage || null,
+        d.insurance || null, d.secondary_insurance || null, d.insurance_verified || null,
+        d.contact1 || null, d.contact2 || null, d.contact3 || null,
+        d.referral_form || null, d.permission_assessment || null, d.vineland || null, d.srs2 || null,
+        d.attends_school || null, d.iep_report || null, d.autism_diagnosis || null,
+        d.intake_paperwork || null, d.intake_personnel || null,
+        d.referral_source || null, d.referral_source_phone || null, d.referral_source_fax || null,
+        d.provider_npi || null, d.point_of_contact || null, d.reason_for_referral || null, d.notes || null,
       ]
     );
 
@@ -234,7 +255,17 @@ app.patch('/referrals/:id', async (req, res) => {
     const { id } = req.params;
     const data = req.body;
 
-    const allowed = ['first_name', 'last_name', 'caregiver', 'caregiver_phone', 'caregiver_email'];
+    const allowed = [
+      'first_name', 'last_name', 'dob', 'caregiver', 'caregiver_phone', 'caregiver_email',
+      'office', 'status', 'date_received', 'current_stage',
+      'insurance', 'secondary_insurance', 'insurance_verified',
+      'contact1', 'contact2', 'contact3',
+      'referral_form', 'permission_assessment', 'vineland', 'srs2',
+      'attends_school', 'iep_report', 'autism_diagnosis', 'intake_paperwork', 'intake_personnel',
+      'referral_source', 'referral_source_phone', 'referral_source_fax',
+      'provider_npi', 'point_of_contact', 'reason_for_referral', 'notes',
+      'ready_for_parent_interview',
+    ];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
 
     if (fields.length === 0) {
