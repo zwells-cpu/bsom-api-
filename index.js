@@ -3,6 +3,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const crypto = require('crypto');
+const multer = require('multer');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(express.json());
@@ -411,6 +414,186 @@ app.delete('/referrals/:id', async (req, res) => {
   } catch (error) {
     console.error('Delete error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ── Supabase storage client (service role – bypasses RLS) ─────────────────────
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+// ── Multer: memory storage, 10 MB hard cap ────────────────────────────────────
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+// Wraps upload.single so multer errors become clean JSON responses instead of
+// Express's default HTML error page or an unhandled-exception crash.
+function uploadSingle(fieldName) {
+  return (req, res, next) => {
+    upload.single(fieldName)(req, res, (err) => {
+      if (!err) return next();
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({ error: 'File is too large. Maximum size is 10 MB.' });
+        }
+        return res.status(400).json({ error: `Upload error: ${err.message}` });
+      }
+      // Non-multer error from the stream (e.g. malformed multipart)
+      return res.status(400).json({ error: 'Malformed multipart request.' });
+    });
+  };
+}
+
+// ── Magic-byte file type detection ────────────────────────────────────────────
+// Inspects the raw buffer so a renamed or spoofed MIME type is still rejected.
+const ALLOWED_SIGNATURES = [
+  { mime: 'application/pdf', check: (b) => b[0]===0x25&&b[1]===0x50&&b[2]===0x44&&b[3]===0x46 }, // %PDF
+  { mime: 'image/jpeg',      check: (b) => b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF },
+  { mime: 'image/png',       check: (b) => b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47&&b[4]===0x0D&&b[5]===0x0A&&b[6]===0x1A&&b[7]===0x0A },
+  { mime: 'image/webp',      check: (b) => b[0]===0x52&&b[1]===0x49&&b[2]===0x46&&b[3]===0x46&&b[8]===0x57&&b[9]===0x45&&b[10]===0x42&&b[11]===0x50 }, // RIFF....WEBP
+];
+
+function detectMagicType(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  for (const sig of ALLOWED_SIGNATURES) {
+    if (sig.check(buffer)) return sig.mime;
+  }
+  return null;
+}
+
+function sanitizeFileName(name) {
+  return (name || 'document').replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
+}
+
+// ── GET /referrals/:id/documents ──────────────────────────────────────────────
+app.get('/referrals/:id/documents', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(
+      'SELECT * FROM public.client_documents WHERE referral_id = $1 ORDER BY created_at DESC',
+      [id]
+    );
+    const rows = result.rows;
+
+    // Attach a short-lived signed URL so the frontend can view/download each
+    // file without making the bucket public.
+    if (rows.length > 0) {
+      const paths = rows.map((r) => r.file_path);
+      const { data: signed } = await supabase.storage
+        .from('client-documents')
+        .createSignedUrls(paths, 3600); // 1-hour TTL
+
+      const urlMap = {};
+      if (Array.isArray(signed)) {
+        for (const entry of signed) {
+          if (entry.signedUrl) urlMap[entry.path] = entry.signedUrl;
+        }
+      }
+
+      const enriched = rows.map((r) => ({ ...r, signed_url: urlMap[r.file_path] ?? null }));
+      return res.json(enriched);
+    }
+
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /referrals/:id/documents error:', err);
+    res.status(500).json({ error: 'Could not retrieve documents.' });
+  }
+});
+
+// ── POST /referrals/:id/documents ─────────────────────────────────────────────
+app.post('/referrals/:id/documents', uploadSingle('file'), async (req, res) => {
+  try {
+    const { id: referralId } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided.' });
+    }
+
+    // 1. Magic-byte validation – rejects spoofed files regardless of MIME header
+    const detectedMime = detectMagicType(req.file.buffer);
+    if (!detectedMime) {
+      return res.status(400).json({ error: 'File type not allowed. Upload a real PDF, JPEG, PNG, or WebP.' });
+    }
+
+    const { document_type, uploaded_by, uploaded_by_name, client_name } = req.body;
+
+    // 2. Build a collision-safe storage path
+    const safeName = sanitizeFileName(req.file.originalname);
+    const filePath = `${referralId}/${crypto.randomUUID()}-${safeName}`;
+
+    // 3. Upload to Supabase storage
+    const { error: storageError } = await supabase.storage
+      .from('client-documents')
+      .upload(filePath, req.file.buffer, {
+        contentType: detectedMime, // use the verified type, not the client-supplied one
+        upsert: false,
+      });
+
+    if (storageError) {
+      console.error('Storage upload error:', storageError);
+      return res.status(500).json({ error: 'Storage upload failed.' });
+    }
+
+    // 4. Persist metadata to the database
+    let row;
+    try {
+      const insert = await db.query(
+        `INSERT INTO public.client_documents
+           (referral_id, document_type, file_name, file_path, file_size, mime_type, uploaded_by, uploaded_by_name, client_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING *`,
+        [
+          referralId,
+          document_type || 'Other',
+          req.file.originalname,
+          filePath,
+          req.file.size,
+          detectedMime,
+          uploaded_by || null,
+          uploaded_by_name || null,
+          client_name || null,
+        ]
+      );
+      row = insert.rows[0];
+    } catch (dbErr) {
+      // Rollback: remove the file that was already stored
+      await supabase.storage.from('client-documents').remove([filePath]);
+      console.error('DB insert error (storage rolled back):', dbErr);
+      return res.status(500).json({ error: 'Database insert failed.' });
+    }
+
+    // 5. Activity log (best-effort – a failure here does not fail the upload)
+    try {
+      await db.query(
+        `INSERT INTO public.activity_logs
+           (action, action_type, entity_type, entity_id, entity_name, client_name, description, actor, details, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          'document_uploaded',
+          'document_uploaded',
+          'referral',
+          referralId,
+          client_name || null,
+          client_name || null,
+          `${client_name || 'Client'} had a ${document_type || 'document'} uploaded.`,
+          uploaded_by_name || null,
+          JSON.stringify({ document_type, file_name: req.file.originalname, mime_type: detectedMime, file_size: req.file.size }),
+          JSON.stringify({ document_type, file_name: req.file.originalname, mime_type: detectedMime, file_size: req.file.size }),
+        ]
+      );
+    } catch (logErr) {
+      console.error('Activity log insert failed (non-fatal):', logErr);
+    }
+
+    res.status(201).json(row);
+  } catch (err) {
+    console.error('POST /referrals/:id/documents error:', err);
+    res.status(500).json({ error: 'Document upload failed.' });
   }
 });
 
