@@ -220,37 +220,6 @@ app.post('/referrals', async (req, res) => {
     res.status(500).json({ error: error.message })
   }
 })
-      VALUES (
-        $1,$2,$3,$4,$5,$6,
-        $7,$8,$9,$10,
-        $11,$12,$13,
-        $14,$15,$16,
-        $17,$18,$19,$20,
-        $21,$22,$23,$24,$25,
-        $26,$27,$28,
-        $29,$30,$31,$32
-      )
-      RETURNING *`,
-      [
-        d.first_name || null, d.last_name || null, d.dob || null,
-        d.caregiver || null, d.caregiver_phone || null, d.caregiver_email || null,
-        d.office || null, d.status || 'active', d.date_received || null, d.current_stage || null,
-        d.insurance || null, d.secondary_insurance || null, d.insurance_verified || null,
-        d.contact1 || null, d.contact2 || null, d.contact3 || null,
-        d.referral_form || null, d.permission_assessment || null, d.vineland || null, d.srs2 || null,
-        d.attends_school || null, d.iep_report || null, d.autism_diagnosis || null,
-        d.intake_paperwork || null, d.intake_personnel || null,
-        d.referral_source || null, d.referral_source_phone || null, d.referral_source_fax || null,
-        d.provider_npi || null, d.point_of_contact || null, d.reason_for_referral || null, d.notes || null,
-      ]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Create referral error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 app.patch('/referrals/:id', async (req, res) => {
   try {
