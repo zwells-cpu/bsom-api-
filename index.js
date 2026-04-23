@@ -6,6 +6,7 @@ const { Pool } = require('pg');
 const crypto = require('crypto');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
+const { logAuditEvent } = require('./helpers/logAuditEvent');
 
 const app = express();
 app.use(express.json());
@@ -213,7 +214,21 @@ app.post('/referrals', async (req, res) => {
     const result = await db.query(
       `INSERT INTO public.referrals (${cols}) VALUES (${placeholders}) RETURNING *`,
       values
-    )
+    );
+
+    const newReferral = result.rows[0];
+
+await logAuditEvent(db, {
+  action: 'referral_created',
+  entity_type: 'referral',
+  entity_id: newReferral.id,
+  entity_label: `${newReferral.first_name} ${newReferral.last_name}`,
+  description: 'New referral created',
+  details_json: {
+    office: newReferral.office,
+    insurance: newReferral.insurance
+  }
+});
     res.status(201).json(result.rows[0])
   } catch (error) {
     console.error('Create referral error:', error)
@@ -602,4 +617,14 @@ app.post('/referrals/:id/documents', uploadSingle('file'), async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`BSOM API running on port ${PORT}`)
+});
+
+app.get('/test-audit', async (req, res) => {
+  await logAuditEvent(db, {
+    action: 'test_event',
+    entity_type: 'system',
+    description: 'Testing audit log write'
+  });
+
+  res.send('Audit log test complete');
 });
