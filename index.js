@@ -663,6 +663,52 @@ app.post('/referrals/:id/documents', uploadSingle('file'), async (req, res) => {
   }
 });
 
+app.get('/profiles/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('full_name, role, office')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Profile fetch error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data ?? null);
+  } catch (err) {
+    console.error('GET /profiles/:id error:', err);
+    res.status(500).json({ error: 'Could not retrieve profile.' });
+  }
+});
+
+app.post('/api/audit-logs', async (req, res) => {
+  try {
+    const { user_id, user_email, user_role, action, entity_type, entity_id, entity_label, description, details_json } = req.body;
+    await logAuditEvent(db, { user_id, user_email, user_role, action, entity_type, entity_id, entity_label, description, details_json });
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/audit-logs error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/audit-logs', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const result = await db.query(
+      'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1',
+      [limit]
+    );
+    res.json({ data: result.rows });
+  } catch (err) {
+    console.error('GET /api/audit-logs error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`BSOM API running on port ${PORT}`)
