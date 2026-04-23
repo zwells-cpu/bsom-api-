@@ -258,6 +258,17 @@ app.patch('/referrals/:id', async (req, res) => {
       return res.status(400).json({ error: 'No valid fields provided' });
     }
 
+    const existingReferral = await db.query(
+      'SELECT * FROM public.referrals WHERE id = $1',
+      [id]
+    );
+
+    if (existingReferral.rows.length === 0) {
+      return res.status(404).json({ error: 'Referral not found' });
+    }
+
+    const beforeReferral = existingReferral.rows[0];
+
     const setClauses = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
     const values = fields.map(f => data[f]);
     values.push(id);
@@ -267,11 +278,30 @@ app.patch('/referrals/:id', async (req, res) => {
       values
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Referral not found' });
-    }
+    const updatedReferral = result.rows[0];
+    const changedFields = fields.filter(field => beforeReferral[field] !== updatedReferral[field]);
+    const before = {};
+    const after = {};
 
-    res.json(result.rows[0]);
+    changedFields.forEach(field => {
+      before[field] = beforeReferral[field];
+      after[field] = updatedReferral[field];
+    });
+
+    await logAuditEvent(db, {
+      action: 'referral_updated',
+      entity_type: 'referral',
+      entity_id: updatedReferral.id,
+      entity_label: `${updatedReferral.first_name} ${updatedReferral.last_name}`,
+      description: 'Referral updated',
+      details_json: {
+        changed_fields: changedFields,
+        before,
+        after,
+      }
+    });
+
+    res.json(updatedReferral);
   } catch (error) {
     console.error('Update referral error:', error);
     res.status(500).json({ error: error.message });
