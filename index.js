@@ -355,8 +355,13 @@ app.patch('/assessments/:id', async (req, res) => {
     const data = req.body;
 
     const allowed = [
+      'client_name', 'clinic', 'assigned_bcba',
+      'caregiver', 'caregiver_phone', 'caregiver_email',
+      'insurance', 'other_services', 'notes',
+      'vineland', 'srs2', 'vbmapp', 'socially_savvy',
       'parent_interview_status', 'parent_interview_scheduled_date', 'parent_interview_completed_date',
       'assessment_status', 'assessment_started_date', 'assessment_completed_date',
+      'direct_obs',
       'treatment_plan_status', 'treatment_plan_started_date', 'treatment_plan_completed_date',
       'authorization_status', 'authorization_submitted_date', 'authorization_approved_date',
       'ready_for_services', 'active_client_date',
