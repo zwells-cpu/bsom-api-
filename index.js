@@ -717,6 +717,51 @@ app.get('/api/audit-logs', async (req, res) => {
   }
 });
 
+// ── POST /api/notify ─────────────────────────────────────────────────────────
+const nodemailer = require('nodemailer');
+
+app.post('/api/notify', async (req, res) => {
+  const { email, type = 'email' } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email address is required.' });
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        type: 'OAuth2',
+        user: process.env.GMAIL_FROM,
+        clientId: process.env.GMAIL_CLIENT_ID,
+        clientSecret: process.env.GMAIL_CLIENT_SECRET,
+        refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"Behavioral Solutions of Mississippi" <${process.env.GMAIL_FROM}>`,
+      to: email,
+      subject: 'Action Required: Complete Your Assessment',
+      text: `Hello,\n\nThis is a friendly reminder to complete your assessment. Please check your email inbox — and don't forget to check your spam folder.\n\n— Behavioral Solutions of Mississippi`,
+    });
+
+    // Log the notification in audit trail
+    await logAuditEvent(db, {
+      action: 'notification_sent',
+      entity_type: 'referral',
+      description: `Assessment reminder sent via ${type}`,
+      details_json: { type, delivered_to: email }
+    });
+
+    res.json({ ok: true, message: 'Notification sent successfully.' });
+
+  } catch (error) {
+    console.error('Notify error:', error);
+    res.status(500).json({ error: 'Failed to send notification.' });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`BSOM API running on port ${PORT}`)
