@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /tmp)",
+      "Bash(unzip -q /c/Users/zdom9/Downloads/bsom-intake-portal-v3-main.zip)"
+    ]
+  }
+}
