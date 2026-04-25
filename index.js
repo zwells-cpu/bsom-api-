@@ -743,7 +743,7 @@ app.post('/api/notify', async (req, res) => {
       from: `"Behavioral Solutions of Mississippi" <${process.env.GMAIL_FROM}>`,
       to: email,
       subject: 'Action Required: Complete Your Assessment',
-      text: `Hello,\n\nThis is a friendly reminder to complete your assessment. Please check your email inbox — and don't forget to check your spam folder.\n\n— Behavioral Solutions of Mississippi`,
+      text: `Hello,\n\nThis is a friendly reminder to complete your child's SRS-2 and Vineland assessments. Please check your email inbox — and don't forget to check your spam folder.\n\n— Behavioral Solutions of Mississippi`,
     });
 
     // Log the notification in audit trail
