@@ -99,6 +99,118 @@ app.get('/activity-logs/:id', async (req, res) => {
   }
 });
 
+app.get('/bcba-staff', async (req, res) => {
+  try {
+    const { active } = req.query;
+    const values = [];
+    let whereClause = '';
+
+    if (active === 'true' || active === 'false') {
+      values.push(active === 'true');
+      whereClause = 'WHERE is_active = $1';
+    }
+
+    const result = await db.query(
+      `SELECT *
+       FROM public.bcba_staff
+       ${whereClause}
+       ORDER BY is_active DESC, full_name ASC`,
+      values
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('GET /bcba-staff error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/bcba-staff', async (req, res) => {
+  try {
+    const data = req.body;
+
+    if (!data.full_name || !data.email || !data.office) {
+      return res.status(400).json({ error: 'full_name, email, and office are required' });
+    }
+
+    const result = await db.query(
+      `INSERT INTO public.bcba_staff (full_name, email, office, is_active)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [
+        data.full_name,
+        data.email,
+        data.office,
+        data.is_active ?? true,
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('POST /bcba-staff error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/bcba-staff/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = req.body;
+    const allowed = ['full_name', 'email', 'office', 'is_active'];
+    const fields = Object.keys(data).filter(k => allowed.includes(k));
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided' });
+    }
+
+    const setClauses = fields.map((field, index) => `${field} = $${index + 1}`);
+    setClauses.push(`updated_at = NOW()`);
+
+    const values = fields.map(field => data[field]);
+    values.push(id);
+
+    const result = await db.query(
+      `UPDATE public.bcba_staff
+       SET ${setClauses.join(', ')}
+       WHERE id = $${values.length}
+       RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'BCBA staff member not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('PATCH /bcba-staff/:id error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/bcba-staff/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(
+      `UPDATE public.bcba_staff
+       SET is_active = false, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'BCBA staff member not found' });
+    }
+
+    res.json({ message: 'BCBA staff member deactivated', data: result.rows[0] });
+  } catch (error) {
+    console.error('DELETE /bcba-staff/:id error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/referrals/:id/activity', async (req, res) => {
   try {
     const { id } = req.params;
