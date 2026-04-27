@@ -888,3 +888,40 @@ app.get('/test-audit', async (req, res) => {
 
   res.send('Audit log test complete');
 });
+
+// ── POST /api/notify-sms ──────────────────────────────────────────────────────
+const twilio = require('twilio');
+
+app.post('/api/notify-sms', async (req, res) => {
+  const { phone } = req.body;
+
+  if (!phone) {
+    return res.status(400).json({ error: 'Phone number is required.' });
+  }
+
+  try {
+    const client = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    await client.messages.create({
+      body: `Hello, this is a friendly reminder to complete your SRS-2 and Vineland assessments. Please check your email inbox and spam folder. Reply STOP to opt out. — Behavioral Solutions of Mississippi`,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: phone
+    });
+
+    await logAuditEvent(db, {
+      action: 'sms_notification_sent',
+      entity_type: 'referral',
+      description: 'Assessment reminder sent via SMS',
+      details_json: { type: 'sms' }
+    });
+
+    res.json({ ok: true, message: 'SMS sent successfully.' });
+
+  } catch (error) {
+    console.error('SMS notify error:', error);
+    res.status(500).json({ error: 'Failed to send SMS.' });
+  }
+});
