@@ -99,6 +99,91 @@ app.get('/activity-logs/:id', async (req, res) => {
   }
 });
 
+async function getTableColumns(tableName, queryable = db) {
+  const result = await queryable.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = $1`,
+    [tableName]
+  );
+
+  return new Set(result.rows.map((row) => row.column_name));
+}
+
+function normalizeBoolean(value) {
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function buildClientName(referral) {
+  return [referral.first_name, referral.last_name].filter(Boolean).join(' ').trim() || null;
+}
+
+function addIfColumn(payload, columns, column, value) {
+  if (columns.has(column) && value !== undefined) {
+    payload[column] = value;
+  }
+}
+
+async function ensureAssessmentForReferral(referral) {
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [String(referral.id)]);
+
+    const existing = await client.query(
+      'SELECT * FROM public.assessments WHERE referral_id = $1 LIMIT 1',
+      [referral.id]
+    );
+
+    if (existing.rows.length > 0) {
+      await client.query('COMMIT');
+      return existing.rows[0];
+    }
+
+    const assessmentColumns = await getTableColumns('assessments', client);
+    const insertData = {};
+    const clientName = buildClientName(referral);
+
+    addIfColumn(insertData, assessmentColumns, 'referral_id', referral.id);
+    addIfColumn(insertData, assessmentColumns, 'client_name', clientName);
+    addIfColumn(insertData, assessmentColumns, 'clinic', referral.office ?? null);
+    addIfColumn(insertData, assessmentColumns, 'office', referral.office ?? null);
+    addIfColumn(insertData, assessmentColumns, 'insurance', referral.insurance ?? null);
+    addIfColumn(insertData, assessmentColumns, 'caregiver', referral.caregiver ?? null);
+    addIfColumn(insertData, assessmentColumns, 'caregiver_name', referral.caregiver ?? null);
+    addIfColumn(insertData, assessmentColumns, 'caregiver_phone', referral.caregiver_phone ?? null);
+    addIfColumn(insertData, assessmentColumns, 'caregiver_email', referral.caregiver_email ?? null);
+    addIfColumn(insertData, assessmentColumns, 'dob', referral.dob ?? null);
+    addIfColumn(insertData, assessmentColumns, 'date_of_birth', referral.dob ?? null);
+    addIfColumn(insertData, assessmentColumns, 'notes', referral.notes ?? null);
+    addIfColumn(insertData, assessmentColumns, 'parent_interview_status', 'Awaiting Assignment');
+    addIfColumn(insertData, assessmentColumns, 'assessment_status', 'Not Started');
+    addIfColumn(insertData, assessmentColumns, 'treatment_plan_status', 'Not Started');
+    addIfColumn(insertData, assessmentColumns, 'authorization_status', 'Not Submitted');
+    addIfColumn(insertData, assessmentColumns, 'ready_for_services', false);
+
+    const fields = Object.keys(insertData);
+    const values = Object.values(insertData);
+    const placeholders = fields.map((_, index) => `$${index + 1}`).join(', ');
+
+    const created = await client.query(
+      `INSERT INTO public.assessments (${fields.join(', ')})
+       VALUES (${placeholders})
+       RETURNING *`,
+      values
+    );
+
+    await client.query('COMMIT');
+    return created.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 app.get('/bcba-staff', async (req, res) => {
   try {
     const { active } = req.query;
@@ -380,13 +465,44 @@ app.patch('/referrals/:id', async (req, res) => {
     }
 
     const beforeReferral = existingReferral.rows[0];
+    const shouldEnsureAssessment = fields.includes('ready_for_parent_interview')
+      && normalizeBoolean(data.ready_for_parent_interview);
+    const isPromotingToInitialAssessment = shouldEnsureAssessment
+      && !normalizeBoolean(beforeReferral.ready_for_parent_interview);
+    const referralColumns = isPromotingToInitialAssessment
+      ? await getTableColumns('referrals')
+      : new Set();
 
-    const setClauses = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
-    const values = fields.map(f => data[f]);
+    const values = fields.map((field) => (
+      field === 'ready_for_parent_interview' ? normalizeBoolean(data[field]) : data[field]
+    ));
+    const setClauses = fields.map((field, index) => `${field} = $${index + 1}`);
+
+    if (isPromotingToInitialAssessment) {
+      if (referralColumns.has('lifecycle_status')) {
+        values.push('moved_to_initial_assessment');
+        setClauses.push(`lifecycle_status = $${values.length}`);
+      }
+
+      if (referralColumns.has('referral_stage')) {
+        values.push('Initial Assessment');
+        setClauses.push(`referral_stage = $${values.length}`);
+      }
+
+      if (referralColumns.has('current_stage')) {
+        values.push('Initial Assessment');
+        setClauses.push(`current_stage = $${values.length}`);
+      }
+
+      if (referralColumns.has('moved_to_initial_at')) {
+        setClauses.push('moved_to_initial_at = NOW()');
+      }
+    }
+
     values.push(id);
 
     const result = await db.query(
-      `UPDATE public.referrals SET ${setClauses} WHERE id = $${values.length} RETURNING *`,
+      `UPDATE public.referrals SET ${setClauses.join(', ')} WHERE id = $${values.length} RETURNING *`,
       values
     );
 
@@ -412,6 +528,11 @@ app.patch('/referrals/:id', async (req, res) => {
         after,
       }
     });
+
+    if (shouldEnsureAssessment) {
+      const assessment = await ensureAssessmentForReferral(updatedReferral);
+      return res.json({ ...updatedReferral, assessment });
+    }
 
     res.json(updatedReferral);
   } catch (error) {
