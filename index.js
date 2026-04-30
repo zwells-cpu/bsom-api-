@@ -564,6 +564,53 @@ app.post('/activity-logs', async (req, res) => {
   }
 });
 
+app.post('/feedback', async (req, res) => {
+  try {
+    const data = req.body || {};
+    if (Array.isArray(data) || typeof data !== 'object') {
+      return res.status(400).json({ error: 'Feedback request body must be a JSON object' });
+    }
+
+    const requiredFields = [
+      'user_id',
+      'user_email',
+      'user_role',
+      'feedback_type',
+      'felt_unclear',
+      'easier_tomorrow',
+    ];
+    const missingFields = requiredFields.filter((field) => data[field] === undefined);
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        error: 'Missing required feedback fields',
+        fields: missingFields,
+      });
+    }
+
+    await db.query(
+      `INSERT INTO public.portal_feedback (
+        user_id, user_email, user_role,
+        feedback_type, felt_unclear, easier_tomorrow
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        data.user_id,
+        data.user_email,
+        data.user_role,
+        data.feedback_type,
+        data.felt_unclear,
+        data.easier_tomorrow,
+      ]
+    );
+
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error('Create feedback error:', error);
+    res.status(500).json({ error: 'Failed to save feedback' });
+  }
+});
+
 app.delete('/referrals/:id', async (req, res) => {
   try {
     const { id } = req.params;
