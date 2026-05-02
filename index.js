@@ -892,7 +892,11 @@ app.get('/referrals/:id/documents', async (req, res) => {
         }
       }
 
-      const enriched = rows.map((r) => ({ ...r, signed_url: urlMap[r.file_path] ?? null }));
+      const enriched = rows.map((r) => ({
+        ...r,
+        uploaded_at: r.uploaded_at ?? r.created_at ?? null,
+        signed_url: urlMap[r.file_path] ?? null,
+      }));
       return res.json(enriched);
     }
 
@@ -992,6 +996,56 @@ app.post('/referrals/:id/documents', uploadSingle('file'), async (req, res) => {
   } catch (err) {
     console.error('POST /referrals/:id/documents error:', err);
     res.status(500).json({ error: 'Document upload failed.' });
+  }
+});
+
+// ── DELETE /referrals/:referralId/documents/:documentId ───────────────────────
+app.delete('/referrals/:referralId/documents/:documentId', async (req, res) => {
+  try {
+    const { referralId, documentId } = req.params;
+
+    const result = await db.query(
+      'SELECT * FROM public.client_documents WHERE id = $1',
+      [documentId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+
+    const doc = result.rows[0];
+
+    if (String(doc.referral_id) !== String(referralId)) {
+      return res.status(400).json({ error: 'Document does not belong to this referral.' });
+    }
+
+    const { error: storageError } = await supabase.storage
+      .from('client-documents')
+      .remove([doc.file_path]);
+
+    if (storageError) {
+      console.error('Storage deletion error:', storageError);
+      return res.status(500).json({ error: 'Storage deletion failed. DB row preserved.' });
+    }
+
+    await db.query('DELETE FROM public.client_documents WHERE id = $1', [documentId]);
+
+    try {
+      await logAuditEvent(db, {
+        action: 'document_deleted',
+        entity_type: 'referral',
+        entity_id: referralId,
+        description: `Document deleted: ${doc.file_name}`,
+        details_json: { document_type: doc.document_type, file_name: doc.file_name },
+      });
+    } catch (logErr) {
+      console.error('Activity log insert failed (non-fatal):', logErr);
+    }
+
+    res.json({ success: true, message: 'Document deleted.' });
+  } catch (err) {
+    console.error('DELETE /referrals/:referralId/documents/:documentId error:', err);
+    res.status(500).json({ error: 'Document deletion failed.' });
   }
 });
 
