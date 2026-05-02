@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(cd /tmp)",
-      "Bash(unzip -q /c/Users/zdom9/Downloads/bsom-intake-portal-v3-main.zip)"
+      "Bash(unzip -q /c/Users/zdom9/Downloads/bsom-intake-portal-v3-main.zip)",
+      "PowerShell(Get-ChildItem C:\\\\Users\\\\zdom9\\\\bsom-api | Where-Object {$_.Name -ne \"node_modules\"} | Select-Object Name, PSIsContainer)",
+      "mcp__claude_ai_Supabase__execute_sql"
     ]
   }
 }
