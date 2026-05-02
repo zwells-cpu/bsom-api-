@@ -114,6 +114,41 @@ function normalizeBoolean(value) {
   return value === true || value === 'true' || value === 1 || value === '1';
 }
 
+function isValidIsoDate(value) {
+  if (value === null || value === undefined || value === '') {
+    return true;
+  }
+
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function normalizeReferralPayload(data) {
+  if (!Object.prototype.hasOwnProperty.call(data, 'insurance_last_verified_date')) {
+    return { normalizedData: data, error: null };
+  }
+
+  if (!isValidIsoDate(data.insurance_last_verified_date)) {
+    return {
+      normalizedData: data,
+      error: 'insurance_last_verified_date must be null or in YYYY-MM-DD format',
+    };
+  }
+
+  return {
+    normalizedData: {
+      ...data,
+      insurance_last_verified_date:
+        data.insurance_last_verified_date === '' ? null : data.insurance_last_verified_date,
+    },
+    error: null,
+  };
+}
+
 function buildClientName(referral) {
   return [referral.first_name, referral.last_name].filter(Boolean).join(' ').trim() || null;
 }
@@ -403,7 +438,11 @@ app.get('/referrals/:id', async (req, res) => {
 
 app.post('/referrals', async (req, res) => {
   try {
-    const data = req.body
+    const { normalizedData: data, error: validationError } = normalizeReferralPayload(req.body);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
     const fields = Object.keys(data)
     const values = Object.values(data)
     const cols = fields.join(', ')
@@ -436,12 +475,17 @@ await logAuditEvent(db, {
 app.patch('/referrals/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const data = req.body;
+    const { normalizedData: data, error: validationError } = normalizeReferralPayload(req.body);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
 
     const allowed = [
       'first_name', 'last_name', 'dob', 'caregiver', 'caregiver_phone', 'caregiver_email',
       'office', 'status', 'date_received', 'current_stage',
       'insurance', 'secondary_insurance', 'insurance_verified',
+      'insurance_member_id', 'client_address', 'insurance_last_verified_date',
+      'insurance_verification_notes', 'insurance_verification_status',
       'contact1', 'contact2', 'contact3',
       'referral_form', 'permission_assessment', 'vineland', 'srs2',
       'attends_school', 'iep_report', 'autism_diagnosis', 'intake_paperwork', 'intake_personnel',
