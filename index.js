@@ -128,25 +128,75 @@ function isValidIsoDate(value) {
 }
 
 function normalizeReferralPayload(data) {
-  if (!Object.prototype.hasOwnProperty.call(data, 'insurance_last_verified_date')) {
-    return { normalizedData: data, error: null };
+  const normalizedData = { ...data };
+
+  if (Object.prototype.hasOwnProperty.call(normalizedData, 'insurance_last_verified_date')) {
+    if (!isValidIsoDate(normalizedData.insurance_last_verified_date)) {
+      return {
+        normalizedData,
+        error: 'insurance_last_verified_date must be null or in YYYY-MM-DD format',
+      };
+    }
+
+    normalizedData.insurance_last_verified_date =
+      normalizedData.insurance_last_verified_date === '' ? null : normalizedData.insurance_last_verified_date;
   }
 
-  if (!isValidIsoDate(data.insurance_last_verified_date)) {
-    return {
-      normalizedData: data,
-      error: 'insurance_last_verified_date must be null or in YYYY-MM-DD format',
-    };
+  if (Object.prototype.hasOwnProperty.call(normalizedData, 'dob')) {
+    if (!isValidIsoDate(normalizedData.dob)) {
+      return {
+        normalizedData,
+        error: 'dob must be null or in YYYY-MM-DD format',
+      };
+    }
+
+    normalizedData.dob = normalizedData.dob === '' ? null : normalizedData.dob;
   }
 
-  return {
-    normalizedData: {
-      ...data,
-      insurance_last_verified_date:
-        data.insurance_last_verified_date === '' ? null : data.insurance_last_verified_date,
-    },
-    error: null,
-  };
+  if (Object.prototype.hasOwnProperty.call(normalizedData, 'gender')) {
+    const hasTextGender = normalizedData.gender !== null && normalizedData.gender !== undefined;
+
+    if (hasTextGender && typeof normalizedData.gender !== 'string') {
+      return {
+        normalizedData,
+        error: 'gender must be null or text',
+      };
+    }
+
+    normalizedData.gender = normalizedData.gender === '' ? null : normalizedData.gender;
+  }
+
+  return { normalizedData, error: null };
+}
+
+function normalizeAssessmentPayload(data) {
+  const normalizedData = { ...data };
+
+  if (Object.prototype.hasOwnProperty.call(normalizedData, 'dob')) {
+    if (!isValidIsoDate(normalizedData.dob)) {
+      return {
+        normalizedData,
+        error: 'dob must be null or in YYYY-MM-DD format',
+      };
+    }
+
+    normalizedData.dob = normalizedData.dob === '' ? null : normalizedData.dob;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(normalizedData, 'gender')) {
+    const hasTextGender = normalizedData.gender !== null && normalizedData.gender !== undefined;
+
+    if (hasTextGender && typeof normalizedData.gender !== 'string') {
+      return {
+        normalizedData,
+        error: 'gender must be null or text',
+      };
+    }
+
+    normalizedData.gender = normalizedData.gender === '' ? null : normalizedData.gender;
+  }
+
+  return { normalizedData, error: null };
 }
 
 function buildClientName(referral) {
@@ -191,6 +241,7 @@ async function ensureAssessmentForReferral(referral) {
     addIfColumn(insertData, assessmentColumns, 'caregiver_email', referral.caregiver_email ?? null);
     addIfColumn(insertData, assessmentColumns, 'dob', referral.dob ?? null);
     addIfColumn(insertData, assessmentColumns, 'date_of_birth', referral.dob ?? null);
+    addIfColumn(insertData, assessmentColumns, 'gender', referral.gender ?? null);
     addIfColumn(insertData, assessmentColumns, 'notes', referral.notes ?? null);
     addIfColumn(insertData, assessmentColumns, 'parent_interview_status', 'Awaiting Assignment');
     addIfColumn(insertData, assessmentColumns, 'assessment_status', 'Not Started');
@@ -481,7 +532,7 @@ app.patch('/referrals/:id', async (req, res) => {
     }
 
     const allowed = [
-      'first_name', 'last_name', 'dob', 'caregiver', 'caregiver_phone', 'caregiver_email',
+      'first_name', 'last_name', 'dob', 'gender', 'caregiver', 'caregiver_phone', 'caregiver_email',
       'office', 'status', 'date_received', 'current_stage',
       'insurance', 'secondary_insurance', 'insurance_verified',
       'insurance_member_id', 'client_address', 'insurance_last_verified_date',
@@ -587,21 +638,27 @@ app.patch('/referrals/:id', async (req, res) => {
 
 app.post('/assessments', async (req, res) => {
   try {
-    const data = req.body;
+    const { normalizedData: data, error: validationError } = normalizeAssessmentPayload(req.body);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
 
     const result = await db.query(
       `INSERT INTO public.assessments (
         referral_id,
+        dob, gender,
         parent_interview_status, parent_interview_scheduled_date, parent_interview_completed_date,
         assessment_status, assessment_started_date, assessment_completed_date,
         treatment_plan_status, treatment_plan_started_date, treatment_plan_completed_date,
         authorization_status, authorization_submitted_date, authorization_approved_date,
         ready_for_services, active_client_date
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *`,
       [
         data.referral_id,
+        data.dob ?? null,
+        data.gender ?? null,
         data.parent_interview_status ?? null,
         data.parent_interview_scheduled_date ?? null,
         data.parent_interview_completed_date ?? null,
@@ -629,10 +686,14 @@ app.post('/assessments', async (req, res) => {
 app.patch('/assessments/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const data = req.body;
+    const { normalizedData: data, error: validationError } = normalizeAssessmentPayload(req.body);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
 
     const allowed = [
       'client_name', 'clinic', 'assigned_bcba',
+      'dob', 'gender',
       'caregiver', 'caregiver_phone', 'caregiver_email',
       'insurance', 'other_services', 'notes',
       'vineland', 'srs2', 'vbmapp', 'socially_savvy',
